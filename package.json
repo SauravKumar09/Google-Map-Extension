@@ -2,13 +2,20 @@
   "name": "leadsextension",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
     "check-port": "node scripts/check-port.js",
     "kill-port": "node scripts/check-port.js 3000 --kill",
+    "pm2:start": "pm2 start server.js --name leadsextension",
+    "pm2:stop": "pm2 stop leadsextension",
+    "pm2:restart": "pm2 restart leadsextension",
+    "pm2:logs": "pm2 logs leadsextension",
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "keywords": [],
   "author": "",
@@ -17,6 +24,7 @@
   "dependencies": {
     "axios": "^1.13.2",
     "dotenv": "^17.2.3",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "xlsx": "^0.18.5"
   }
 }

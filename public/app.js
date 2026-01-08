@@ -23,6 +23,9 @@ const detailsFields = document.getElementById('detailsFields');
 // State
 let currentNextPageToken = null;
 let currentSearchParams = null;
+let allPlacesData = []; // Store all places data for filtering and export
+let currentPage = 1;
+let filterNoWebsite = true;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -61,6 +64,21 @@ function setupEventListeners() {
     
     // Next page button
     nextPageBtn.addEventListener('click', loadNextPage);
+    
+    // Filter checkbox
+    const filterCheckbox = document.getElementById('filterNoWebsite');
+    if (filterCheckbox) {
+        filterCheckbox.addEventListener('change', (e) => {
+            filterNoWebsite = e.target.checked;
+            filterAndDisplayResults();
+        });
+    }
+    
+    // Download button
+    const downloadBtn = document.getElementById('downloadBtn');
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', downloadExcel);
+    }
 }
 
 // Handle Search Type Change
@@ -209,6 +227,10 @@ async function searchNearbyAll() {
 async function searchText() {
     const query = document.getElementById('query').value;
     
+    if (!query) {
+        throw new Error('Query is required');
+    }
+    
     const params = new URLSearchParams({ query });
     
     const response = await fetch(`${API_BASE_URL}/places/textsearch?${params}`);
@@ -219,6 +241,8 @@ async function searchText() {
     }
     
     currentNextPageToken = data.next_page_token || null;
+    // Store query for pagination reference
+    currentSearchParams = { query };
     return data;
 }
 
@@ -255,15 +279,45 @@ async function loadNextPage() {
         let response;
         
         if (type === 'nearby') {
-            const params = new URLSearchParams({
-                ...currentSearchParams,
-                pageToken: currentNextPageToken
-            });
+            // Get parameters from form fields
+            const keyword = document.getElementById('keyword').value;
+            const lat = document.getElementById('lat').value.trim();
+            const lng = document.getElementById('lng').value.trim();
+            const radius = document.getElementById('radius').value || 5000;
+            const locationName = document.getElementById('locationName').value.trim();
             
-            const apiResponse = await fetch(`${API_BASE_URL}/places/nearby?${params}`);
-            response = await apiResponse.json();
+            // Check if we're using location name (which means we used text search)
+            if (locationName && (!lat || !lng)) {
+                // This was actually a text search, use text search for pagination
+                const query = `${keyword} in ${locationName}`;
+                const params = new URLSearchParams({
+                    query,
+                    pageToken: currentNextPageToken
+                });
+                
+                const apiResponse = await fetch(`${API_BASE_URL}/places/textsearch?${params}`);
+                response = await apiResponse.json();
+            } else if (lat && lng && keyword) {
+                // Use nearby search with coordinates
+                const params = new URLSearchParams({
+                    keyword,
+                    lat,
+                    lng,
+                    radius,
+                    pageToken: currentNextPageToken
+                });
+                
+                const apiResponse = await fetch(`${API_BASE_URL}/places/nearby?${params}`);
+                response = await apiResponse.json();
+            } else {
+                throw new Error('Missing required parameters for pagination');
+            }
         } else if (type === 'textsearch') {
             const query = document.getElementById('query').value;
+            if (!query) {
+                throw new Error('Query is required for pagination');
+            }
+            
             const params = new URLSearchParams({
                 query,
                 pageToken: currentNextPageToken
@@ -271,6 +325,8 @@ async function loadNextPage() {
             
             const apiResponse = await fetch(`${API_BASE_URL}/places/textsearch?${params}`);
             response = await apiResponse.json();
+        } else {
+            throw new Error('Pagination is not available for this search type');
         }
         
         if (response.error) {
@@ -289,9 +345,10 @@ async function loadNextPage() {
 }
 
 // Display Results
-function displayResults(data, type) {
+async function displayResults(data, type) {
     resultsSection.style.display = 'block';
     resultsContainer.innerHTML = '';
+    currentPage = 1;
     
     let places = [];
     if (type === 'details') {
@@ -305,24 +362,131 @@ function displayResults(data, type) {
     if (places.length === 0) {
         resultsContainer.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 40px;">No places found. Try different search parameters.</p>';
         paginationContainer.style.display = 'none';
+        document.getElementById('downloadBtn').style.display = 'none';
         return;
     }
     
-    places.forEach(place => {
-        resultsContainer.appendChild(createPlaceCard(place));
-    });
+    // Fetch enriched data with reviews for all places
+    setLoading(true);
+    try {
+        const placeIds = places.map(p => p.place_id).filter(id => id);
+        if (placeIds.length > 0) {
+            const enrichedResponse = await fetch(`${API_BASE_URL}/places/enrich`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ place_ids: placeIds })
+            });
+            
+            const enrichedData = await enrichedResponse.json();
+            if (enrichedData.places && enrichedData.places.length > 0) {
+                // Merge enriched data with original places
+                const enrichedMap = new Map(enrichedData.places.map(p => [p.place_id, p]));
+                places = places.map(place => {
+                    const enriched = enrichedMap.get(place.place_id);
+                    return enriched ? { ...place, ...enriched } : place;
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error fetching enriched data:', error);
+        // Continue with original data if enrichment fails
+    } finally {
+        setLoading(false);
+    }
     
+    // Store all places data
+    allPlacesData = places;
+    
+    // Filter and display
+    filterAndDisplayResults();
     updatePaginationButton();
 }
 
-// Append Results
-function appendResults(places) {
-    places.forEach(place => {
+// Filter and Display Results
+async function filterAndDisplayResults() {
+    resultsContainer.innerHTML = '';
+    
+    // Filter places based on website availability
+    let filteredPlaces = allPlacesData;
+    if (filterNoWebsite) {
+        filteredPlaces = allPlacesData.filter(place => !place.website || place.website === '');
+    }
+    
+    // Update counts
+    const totalCount = allPlacesData.length;
+    const filteredCount = filteredPlaces.length;
+    resultsCount.textContent = totalCount;
+    
+    const filteredCountEl = document.getElementById('filteredNumber');
+    const filteredCountSpan = document.getElementById('filteredCount');
+    if (filteredCountSpan) {
+        if (filterNoWebsite && filteredCount < totalCount) {
+            filteredCountSpan.style.display = 'inline';
+            if (filteredCountEl) filteredCountEl.textContent = filteredCount;
+        } else {
+            filteredCountSpan.style.display = 'none';
+        }
+    }
+    
+    // Show/hide download button
+    const downloadBtn = document.getElementById('downloadBtn');
+    if (downloadBtn) {
+        downloadBtn.style.display = filteredPlaces.length > 0 ? 'inline-block' : 'none';
+    }
+    
+    if (filteredPlaces.length === 0) {
+        resultsContainer.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 40px;">No places found matching the filter criteria.</p>';
+        return;
+    }
+    
+    // Display filtered places
+    filteredPlaces.forEach(place => {
         resultsContainer.appendChild(createPlaceCard(place));
     });
+}
+
+// Append Results
+async function appendResults(places) {
+    // Fetch enriched data for new places
+    setLoading(true);
+    try {
+        const placeIds = places.map(p => p.place_id).filter(id => id);
+        if (placeIds.length > 0) {
+            const enrichedResponse = await fetch(`${API_BASE_URL}/places/enrich`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ place_ids: placeIds })
+            });
+            
+            const enrichedData = await enrichedResponse.json();
+            if (enrichedData.places && enrichedData.places.length > 0) {
+                const enrichedMap = new Map(enrichedData.places.map(p => [p.place_id, p]));
+                places = places.map(place => {
+                    const enriched = enrichedMap.get(place.place_id);
+                    return enriched ? { ...place, ...enriched } : place;
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error fetching enriched data:', error);
+    } finally {
+        setLoading(false);
+    }
+    
+    // Add to all places data
+    allPlacesData = [...allPlacesData, ...places];
+    
+    // Filter and display
+    filterAndDisplayResults();
     
     const currentCount = parseInt(resultsCount.textContent);
-    resultsCount.textContent = currentCount + places.length;
+    resultsCount.textContent = allPlacesData.length;
+    currentPage++;
+    updatePageInfo();
 }
 
 // Create Place Card
@@ -351,26 +515,54 @@ function createPlaceCard(place) {
         </div>
     ` : '';
     
+    // Phone number - prominently displayed
     const phoneHtml = place.phone ? `
+        <div class="detail-item phone-highlight">
+            <span class="detail-label">📞 Phone:</span>
+            <span class="detail-value phone-number">${place.phone}</span>
+        </div>
+    ` : `
         <div class="detail-item">
             <span class="detail-label">📞 Phone:</span>
-            <span class="detail-value">${place.phone}</span>
+            <span class="detail-value" style="color: #999;">Not available</span>
         </div>
-    ` : '';
+    `;
     
     const websiteHtml = place.website ? `
         <div class="detail-item">
             <span class="detail-label">🌐 Website:</span>
             <a href="${place.website}" target="_blank" class="detail-value">${place.website}</a>
         </div>
-    ` : '';
-    
-    const hoursHtml = place.opening_hours ? `
+    ` : `
         <div class="detail-item">
-            <span class="detail-label">🕐 Hours:</span>
-            <span class="detail-value">${place.opening_hours.open_now ? 'Open Now' : 'Closed'}</span>
+            <span class="detail-label">🌐 Website:</span>
+            <span class="detail-value" style="color: #999;">Not available</span>
         </div>
-    ` : '';
+    `;
+    
+    // Reviews section - top 5 reviews
+    const reviewsHtml = place.reviews && place.reviews.length > 0 ? `
+        <div class="reviews-section">
+            <h4 class="reviews-title">Top ${Math.min(place.reviews.length, 5)} Reviews:</h4>
+            <div class="reviews-list">
+                ${place.reviews.slice(0, 5).map((review, index) => `
+                    <div class="review-item">
+                        <div class="review-header">
+                            <span class="review-author">${review.author_name || 'Anonymous'}</span>
+                            <span class="review-rating">${'⭐'.repeat(review.rating || 0)}</span>
+                            <span class="review-time">${review.relative_time_description || ''}</span>
+                        </div>
+                        <div class="review-text">${review.text || 'No review text available'}</div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    ` : `
+        <div class="reviews-section">
+            <h4 class="reviews-title">Reviews:</h4>
+            <p style="color: #999; font-style: italic;">No reviews available</p>
+        </div>
+    `;
     
     card.innerHTML = `
         <div class="place-header">
@@ -381,11 +573,11 @@ function createPlaceCard(place) {
             ${ratingHtml}
         </div>
         <div class="place-details">
-            ${locationHtml}
             ${phoneHtml}
             ${websiteHtml}
-            ${hoursHtml}
+            ${locationHtml}
         </div>
+        ${reviewsHtml}
         ${typesHtml}
         <div style="margin-top: 15px;">
             <div class="detail-label">Place ID:</div>
@@ -402,6 +594,107 @@ function updatePaginationButton() {
         paginationContainer.style.display = 'block';
     } else {
         paginationContainer.style.display = 'none';
+    }
+    updatePageInfo();
+}
+
+// Update Page Info
+function updatePageInfo() {
+    const pageInfo = document.getElementById('pageInfo');
+    if (pageInfo) {
+        pageInfo.textContent = `Page ${currentPage}`;
+    }
+}
+
+// Download Excel
+async function downloadExcel() {
+    const downloadBtn = document.getElementById('downloadBtn');
+    if (!downloadBtn) return;
+    
+    // Get filtered places
+    let placesToExport = allPlacesData;
+    if (filterNoWebsite) {
+        placesToExport = allPlacesData.filter(place => !place.website || place.website === '');
+    }
+    
+    if (placesToExport.length === 0) {
+        alert('No places to export');
+        return;
+    }
+    
+    setLoading(true);
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = '⏳ Exporting...';
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/places/export-excel`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ places: placesToExport })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Export failed');
+        }
+        
+        // Get the blob and create URLs
+        const blob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        
+        // First, download the file
+        const downloadLink = document.createElement('a');
+        downloadLink.href = blobUrl;
+        downloadLink.download = 'google_places_data.xlsx';
+        downloadLink.style.display = 'none';
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        
+        // Then try to open it in the default application
+        // Create a new blob URL for opening (some browsers need a fresh URL)
+        const openUrl = window.URL.createObjectURL(blob);
+        
+        // Try to open with the default application
+        // This will work if the browser is configured to open .xlsx files externally
+        try {
+            const openWindow = window.open(openUrl, '_blank');
+            
+            // If popup was blocked or failed, try alternative method
+            if (!openWindow || openWindow.closed || typeof openWindow.closed === 'undefined') {
+                // Fallback: create a temporary link and click it
+                const openLink = document.createElement('a');
+                openLink.href = openUrl;
+                openLink.target = '_blank';
+                openLink.style.display = 'none';
+                document.body.appendChild(openLink);
+                openLink.click();
+                
+                // Clean up after a short delay
+                setTimeout(() => {
+                    document.body.removeChild(openLink);
+                }, 100);
+            }
+        } catch (error) {
+            console.log('Could not auto-open file, but download was successful');
+        }
+        
+        // Clean up
+        setTimeout(() => {
+            document.body.removeChild(downloadLink);
+            window.URL.revokeObjectURL(blobUrl);
+            window.URL.revokeObjectURL(openUrl);
+        }, 2000);
+        
+        alert(`Successfully exported ${placesToExport.length} places to Excel!\n\nThe file has been downloaded and should open automatically in your spreadsheet application.`);
+    } catch (error) {
+        console.error('Export error:', error);
+        alert(`Export failed: ${error.message}`);
+    } finally {
+        setLoading(false);
+        downloadBtn.disabled = false;
+        downloadBtn.textContent = '📥 Download Excel';
     }
 }
 
@@ -439,7 +732,13 @@ function clearResults() {
     errorSection.style.display = 'none';
     currentNextPageToken = null;
     currentSearchParams = null;
+    allPlacesData = [];
+    currentPage = 1;
     paginationContainer.style.display = 'none';
+    const downloadBtn = document.getElementById('downloadBtn');
+    if (downloadBtn) downloadBtn.style.display = 'none';
+    const filteredCountSpan = document.getElementById('filteredCount');
+    if (filteredCountSpan) filteredCountSpan.style.display = 'none';
 }
 
 // Setup Examples
