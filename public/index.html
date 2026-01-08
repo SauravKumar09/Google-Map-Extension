@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Maps Places Extractor</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📍 Google Maps Places Extractor</h1>
+            <p class="subtitle">Extract business data from Google Maps using Places API</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Search Form -->
+            <div class="card">
+                <h2>Search Configuration</h2>
+                <form id="searchForm">
+                    <div class="form-group">
+                        <label for="searchType">Search Type</label>
+                        <select id="searchType" name="searchType" required>
+                            <option value="nearby">Nearby Search (Location + Keyword)</option>
+                            <option value="textsearch">Text Search (City + Keyword)</option>
+                            <option value="details">Place Details (Place ID)</option>
+                        </select>
+                    </div>
+
+                    <!-- Nearby Search Fields -->
+                    <div id="nearbyFields" class="search-fields">
+                        <div class="form-group">
+                            <label for="keyword">Keyword *</label>
+                            <input type="text" id="keyword" name="keyword" placeholder="e.g., restaurant, hospital, cafe" required>
+                            <small>Enter the type of place you're looking for</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="locationName">Location Name (Optional)</label>
+                            <input type="text" id="locationName" name="locationName" placeholder="e.g., Delhi, Bangalore, Mumbai">
+                            <small>Enter city or location name. If provided, coordinates are not required.</small>
+                        </div>
+                        <div class="form-group">
+                            <label style="color: var(--text-secondary);">OR Enter Coordinates (Optional)</label>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="lat">Latitude</label>
+                                <input type="number" id="lat" name="lat" step="any" placeholder="28.6139">
+                            </div>
+                            <div class="form-group">
+                                <label for="lng">Longitude</label>
+                                <input type="number" id="lng" name="lng" step="any" placeholder="77.2090">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="radius">Radius (meters)</label>
+                            <input type="number" id="radius" name="radius" value="5000" min="1" max="50000">
+                            <small>Default: 5000m (max: 50000m). Only used with coordinates.</small>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="fetchAllPages" name="fetchAllPages">
+                                Fetch All Pages (Auto-pagination)
+                            </label>
+                            <small>Will automatically fetch multiple pages of results</small>
+                        </div>
+                    </div>
+
+                    <!-- Text Search Fields -->
+                    <div id="textsearchFields" class="search-fields" style="display: none;">
+                        <div class="form-group">
+                            <label for="query">Search Query *</label>
+                            <input type="text" id="query" name="query" placeholder="e.g., cafes in Bangalore, hospitals in Delhi">
+                            <small>Enter your search query as you would in Google Maps</small>
+                        </div>
+                    </div>
+
+                    <!-- Place Details Fields -->
+                    <div id="detailsFields" class="search-fields" style="display: none;">
+                        <div class="form-group">
+                            <label for="placeId">Place ID *</label>
+                            <input type="text" id="placeId" name="placeId" placeholder="ChIJN1t_tDeuEmsRUsoyG83frY4">
+                            <small>Enter the Place ID from a previous search result</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="fields">Fields (comma-separated)</label>
+                            <input type="text" id="fields" name="fields" placeholder="name,phone,website,opening_hours">
+                            <small>Leave empty for default fields</small>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" id="searchBtn" class="btn btn-primary">
+                            <span class="btn-text">Search Places</span>
+                            <span class="btn-loader" style="display: none;">⏳ Searching...</span>
+                        </button>
+                        <button type="button" id="clearBtn" class="btn btn-secondary">Clear Results</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Results Section -->
+            <div id="resultsSection" class="card" style="display: none;">
+                <div class="results-header">
+                    <h2>Search Results</h2>
+                    <div class="results-info">
+                        <span id="resultsCount">0</span> places found
+                    </div>
+                </div>
+                <div id="resultsContainer"></div>
+                <div id="paginationContainer" style="display: none;">
+                    <button id="nextPageBtn" class="btn btn-secondary">Load Next Page</button>
+                </div>
+            </div>
+
+            <!-- Error Section -->
+            <div id="errorSection" class="card error-card" style="display: none;">
+                <h3>❌ Error</h3>
+                <p id="errorMessage"></p>
+            </div>
+        </div>
+
+        <!-- Quick Examples -->
+        <div class="card examples-card">
+            <h3>💡 Quick Examples</h3>
+            <div class="examples-grid">
+                <button class="example-btn" data-example="nearby-delhi">
+                    Restaurants near Delhi
+                </button>
+                <button class="example-btn" data-example="nearby-bangalore">
+                    Hospitals in Bangalore
+                </button>
+                <button class="example-btn" data-example="textsearch-cafes">
+                    Cafes in Mumbai
+                </button>
+                <button class="example-btn" data-example="textsearch-pharmacies">
+                    Pharmacies in Chennai
+                </button>
+            </div>
+        </div>
+
+        <footer>
+            <p>Powered by Google Maps Platform - Places API</p>
+            <p class="api-status" id="apiStatus">Checking API connection...</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
