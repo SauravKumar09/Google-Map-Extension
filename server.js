@@ -64,6 +64,14 @@ app.get("/places/nearby", async (req, res) => {
     });
   }
 
+  // Check if API key is configured
+  if (!process.env.GOOGLE_MAPS_API_KEY) {
+    return res.status(500).json({
+      error: "Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY environment variable.",
+      hint: "Check your Render dashboard → Environment → Add GOOGLE_MAPS_API_KEY"
+    });
+  }
+
   try {
     const params = {
       location: `${lat},${lng}`,
@@ -117,6 +125,14 @@ app.get("/places/textsearch", async (req, res) => {
     });
   }
 
+  // Check if API key is configured
+  if (!process.env.GOOGLE_MAPS_API_KEY) {
+    return res.status(500).json({
+      error: "Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY environment variable.",
+      hint: "Check your Render dashboard → Environment → Add GOOGLE_MAPS_API_KEY"
+    });
+  }
+
   try {
     const params = {
       query,
@@ -164,6 +180,14 @@ app.get("/places/details", async (req, res) => {
   if (!place_id) {
     return res.status(400).json({
       error: "place_id parameter is required"
+    });
+  }
+
+  // Check if API key is configured
+  if (!process.env.GOOGLE_MAPS_API_KEY) {
+    return res.status(500).json({
+      error: "Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY environment variable.",
+      hint: "Check your Render dashboard → Environment → Add GOOGLE_MAPS_API_KEY"
     });
   }
 
@@ -545,6 +569,18 @@ function startServer() {
   }
 
   tryListen(port);
+}
+
+// Check API key on startup
+if (!process.env.GOOGLE_MAPS_API_KEY) {
+  console.error("❌ ERROR: GOOGLE_MAPS_API_KEY environment variable is not set!");
+  console.error("💡 Please set GOOGLE_MAPS_API_KEY in your Render dashboard:");
+  console.error("   1. Go to Render → Your Service → Environment");
+  console.error("   2. Add environment variable: GOOGLE_MAPS_API_KEY");
+  console.error("   3. Value: Your Google Maps API key");
+  console.error("   4. Save and redeploy");
+} else {
+  console.log("✅ Google Maps API key is configured");
 }
 
 startServer();
