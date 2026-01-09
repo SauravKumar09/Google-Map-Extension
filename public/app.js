@@ -26,6 +26,11 @@ let currentSearchParams = null;
 let allPlacesData = []; // Store all places data for filtering and export
 let currentPage = 1;
 let filterNoWebsite = true;
+let displayLimit = 'all'; // Display limit: 'all' or number
+let isFetchingAllPages = false; // Track if we're fetching all pages
+let displayedCount = 0; // Track how many results are currently displayed
+let previousDisplayedCount = 0; // Track previous displayed count for appending
+let isLoadingMore = false; // Track if we're loading more results
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -70,6 +75,17 @@ function setupEventListeners() {
     if (filterCheckbox) {
         filterCheckbox.addEventListener('change', (e) => {
             filterNoWebsite = e.target.checked;
+            displayedCount = 0; // Reset displayed count when filter changes
+            filterAndDisplayResults();
+        });
+    }
+    
+    // Display limit dropdown
+    const displayLimitSelect = document.getElementById('displayLimit');
+    if (displayLimitSelect) {
+        displayLimitSelect.addEventListener('change', (e) => {
+            displayLimit = e.target.value;
+            displayedCount = 0; // Reset displayed count when filter changes
             filterAndDisplayResults();
         });
     }
@@ -78,6 +94,14 @@ function setupEventListeners() {
     const downloadBtn = document.getElementById('downloadBtn');
     if (downloadBtn) {
         downloadBtn.addEventListener('click', downloadExcel);
+    }
+    
+    // Display limit dropdown
+    const displayLimit = document.getElementById('displayLimit');
+    if (displayLimit) {
+        displayLimit.addEventListener('change', () => {
+            filterAndDisplayResults();
+        });
     }
 }
 
@@ -139,12 +163,7 @@ async function handleFormSubmit(e) {
                 response = await searchText();
             } else if (lat && lng) {
                 // Use Nearby Search with coordinates
-                const fetchAll = document.getElementById('fetchAllPages').checked;
-                if (fetchAll) {
-                    response = await searchNearbyAll();
-                } else {
-                    response = await searchNearby();
-                }
+                response = await searchNearby();
             } else {
                 throw new Error('Please provide either a Location Name or both Latitude and Longitude');
             }
@@ -154,7 +173,25 @@ async function handleFormSubmit(e) {
             response = await searchDetails();
         }
         
+        // Display first page results immediately
         displayResults(response, type);
+        
+        // Then automatically fetch all remaining pages in background (for nearby and textsearch only)
+        if (type !== 'details' && currentNextPageToken) {
+            // Fetch all pages automatically (non-blocking)
+            fetchAllPagesAutomatically(type).catch(err => {
+                console.error('Error fetching all pages:', err);
+                const fetchingStatus = document.getElementById('fetchingStatus');
+                if (fetchingStatus) {
+                    fetchingStatus.textContent = '⚠️ Error fetching all pages';
+                    fetchingStatus.style.color = 'var(--danger-color)';
+                }
+            });
+        } else {
+            // No more pages, hide fetching status
+            const autoFetchInfo = document.querySelector('.auto-fetch-info');
+            if (autoFetchInfo) autoFetchInfo.style.display = 'none';
+        }
     } catch (error) {
         showError(error.message);
     } finally {
@@ -338,9 +375,103 @@ async function loadNextPage() {
         currentNextPageToken = response.next_page_token || null;
         updatePaginationButton();
     } catch (error) {
-        showError(error.message);
+        if (!isFetchingAllPages) {
+            showError(error.message);
+        } else {
+            console.error('Error loading next page:', error);
+        }
     } finally {
-        setLoading(false);
+        if (!isFetchingAllPages) {
+            setLoading(false);
+        }
+    }
+}
+
+// Fetch All Pages Automatically
+async function fetchAllPagesAutomatically(type) {
+    isFetchingAllPages = true;
+    const maxPages = 10; // Limit to prevent infinite loops
+    let pageCount = 0;
+    const fetchingStatus = document.getElementById('fetchingStatus');
+    
+    try {
+        while (currentNextPageToken && pageCount < maxPages) {
+            // Wait 2 seconds before next request (Google requirement)
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            await loadNextPage();
+            pageCount++;
+            
+            // Update status
+            if (fetchingStatus) {
+                fetchingStatus.textContent = `⏳ Fetching all results... (${allPlacesData.length} found so far)`;
+            }
+        }
+        
+        // All pages fetched
+        if (fetchingStatus) {
+            fetchingStatus.textContent = `✅ All ${allPlacesData.length} results loaded!`;
+            fetchingStatus.style.color = 'var(--secondary-color)';
+        }
+        
+        // Hide status after 3 seconds
+        setTimeout(() => {
+            const autoFetchInfo = document.querySelector('.auto-fetch-info');
+            if (autoFetchInfo) autoFetchInfo.style.display = 'none';
+        }, 3000);
+        
+    } catch (error) {
+        console.error('Error in fetchAllPagesAutomatically:', error);
+        if (fetchingStatus) {
+            fetchingStatus.textContent = '⚠️ Error fetching all pages';
+            fetchingStatus.style.color = 'var(--danger-color)';
+        }
+    } finally {
+        isFetchingAllPages = false;
+    }
+}
+
+// Fetch All Pages Automatically
+async function fetchAllPagesAutomatically(type) {
+    isFetchingAllPages = true;
+    const maxPages = 10; // Limit to prevent infinite loops
+    let pageCount = 0;
+    const fetchingStatus = document.getElementById('fetchingStatus');
+    const autoFetchInfo = document.querySelector('.auto-fetch-info');
+    
+    try {
+        while (currentNextPageToken && pageCount < maxPages) {
+            // Wait 2 seconds before next request (Google requirement)
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            await loadNextPage();
+            pageCount++;
+            
+            // Update status
+            if (fetchingStatus) {
+                fetchingStatus.textContent = `⏳ Fetching all results... (${allPlacesData.length} found so far)`;
+            }
+        }
+        
+        // All pages fetched
+        if (fetchingStatus) {
+            fetchingStatus.textContent = `✅ All ${allPlacesData.length} results loaded!`;
+            fetchingStatus.style.color = 'var(--secondary-color)';
+        }
+        
+        // Hide status after 3 seconds
+        setTimeout(() => {
+            if (autoFetchInfo) autoFetchInfo.style.display = 'none';
+        }, 3000);
+        
+    } catch (error) {
+        console.error('Error in fetchAllPagesAutomatically:', error);
+        if (fetchingStatus) {
+            fetchingStatus.textContent = '⚠️ Error fetching all pages';
+            fetchingStatus.style.color = 'var(--danger-color)';
+        }
+    } finally {
+        isFetchingAllPages = false;
     }
 }
 
@@ -349,6 +480,7 @@ async function displayResults(data, type) {
     resultsSection.style.display = 'block';
     resultsContainer.innerHTML = '';
     currentPage = 1;
+    displayedCount = 0;
     
     let places = [];
     if (type === 'details') {
@@ -356,68 +488,162 @@ async function displayResults(data, type) {
         resultsCount.textContent = '1';
     } else {
         places = data.places || [];
-        resultsCount.textContent = data.count || places.length;
+        // Don't set count here - will be set in filterAndDisplayResults
     }
+    
+    // Debug: Log the data received
+    console.log('Display Results - Data received:', data);
+    console.log('Display Results - Places array:', places);
+    console.log('Display Results - Places count:', places.length);
     
     if (places.length === 0) {
         resultsContainer.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 40px;">No places found. Try different search parameters.</p>';
         paginationContainer.style.display = 'none';
-        document.getElementById('downloadBtn').style.display = 'none';
+        const downloadControls = document.querySelector('.download-controls');
+        if (downloadControls) downloadControls.style.display = 'none';
         return;
     }
     
-    // Fetch enriched data with reviews for all places
-    setLoading(true);
+    // Store all places data immediately (without enriched data)
+    allPlacesData = places;
+    
+    console.log('Display Results - All places data stored:', allPlacesData.length);
+    
+    // Show loading indicator while processing
+    showResultsLoading();
+    
+    // Display first 20 results immediately
+    setLoading(false);
+    filterAndDisplayResults(20); // Show first 20
+    updatePaginationButton();
+    
+    // Note: Data already has enriched info (phone, website, reviews), so skip background fetch
+    // Only fetch if data doesn't have these fields
+    const needsEnrichment = places.length > 0 && (!places[0].phone && !places[0].website && !places[0].reviews);
+    if (needsEnrichment) {
+        fetchEnrichedDataInBackground(places);
+    } else {
+        // Data is already enriched, just hide loading
+        hideResultsLoading();
+    }
+}
+
+// Fetch enriched data in background and update cards
+async function fetchEnrichedDataInBackground(places) {
+    const placeIds = places.map(p => p.place_id).filter(id => id);
+    if (placeIds.length === 0) return;
+    
     try {
-        const placeIds = places.map(p => p.place_id).filter(id => id);
-        if (placeIds.length > 0) {
-            const enrichedResponse = await fetch(`${API_BASE_URL}/places/enrich`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ place_ids: placeIds })
+        // Fetch enriched data
+        const enrichedResponse = await fetch(`${API_BASE_URL}/places/enrich`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ place_ids: placeIds })
+        });
+        
+        const enrichedData = await enrichedResponse.json();
+        if (enrichedData.places && enrichedData.places.length > 0) {
+            // Update allPlacesData with enriched data
+            const enrichedMap = new Map(enrichedData.places.map(p => [p.place_id, p]));
+            allPlacesData = allPlacesData.map(place => {
+                const enriched = enrichedMap.get(place.place_id);
+                return enriched ? { ...place, ...enriched } : place;
             });
             
-            const enrichedData = await enrichedResponse.json();
-            if (enrichedData.places && enrichedData.places.length > 0) {
-                // Merge enriched data with original places
-                const enrichedMap = new Map(enrichedData.places.map(p => [p.place_id, p]));
-                places = places.map(place => {
-                    const enriched = enrichedMap.get(place.place_id);
-                    return enriched ? { ...place, ...enriched } : place;
-                });
-            }
+            // Re-render to show enriched data
+            filterAndDisplayResults();
         }
     } catch (error) {
         console.error('Error fetching enriched data:', error);
-        // Continue with original data if enrichment fails
-    } finally {
-        setLoading(false);
+        // Continue without enriched data - basic info is already displayed
     }
-    
-    // Store all places data
-    allPlacesData = places;
-    
-    // Filter and display
-    filterAndDisplayResults();
-    updatePaginationButton();
 }
 
 // Filter and Display Results
-async function filterAndDisplayResults() {
-    resultsContainer.innerHTML = '';
+async function filterAndDisplayResults(initialLimit = null) {
+    // Don't clear if we're loading more progressively
+    if (!isLoadingMore) {
+        resultsContainer.innerHTML = '';
+        if (initialLimit === null) {
+            displayedCount = 0; // Reset only if not initial load
+        }
+    }
+    
+    console.log('Filter and Display - All places data:', allPlacesData.length);
+    console.log('Filter and Display - Filter no website:', filterNoWebsite);
     
     // Filter places based on website availability
     let filteredPlaces = allPlacesData;
     if (filterNoWebsite) {
         filteredPlaces = allPlacesData.filter(place => !place.website || place.website === '');
+        console.log('Filter and Display - After filtering (no website):', filteredPlaces.length);
     }
     
-    // Update counts
+    // Update counts - show total fetched count
     const totalCount = allPlacesData.length;
     const filteredCount = filteredPlaces.length;
+    
+    // Show total count (all fetched results) - this is the correct total
     resultsCount.textContent = totalCount;
+    
+    // Apply progressive loading: show 20 first, then allow loading more
+    let placesToDisplay = [];
+    if (initialLimit && !isLoadingMore) {
+        // Initial load: show first 20
+        placesToDisplay = filteredPlaces.slice(0, initialLimit);
+        displayedCount = placesToDisplay.length;
+    } else {
+        // Check display limit from dropdown
+        const displayLimitSelect = document.getElementById('displayLimit');
+        const displayLimitValue = displayLimitSelect ? displayLimitSelect.value : 'all';
+        
+        if (displayLimitValue === 'all') {
+            if (isLoadingMore) {
+                // Progressive loading: show 20 more each time
+                previousDisplayedCount = displayedCount;
+                const increment = 20;
+                const newDisplayCount = Math.min(displayedCount + increment, filteredPlaces.length);
+                placesToDisplay = filteredPlaces.slice(0, newDisplayCount);
+                displayedCount = newDisplayCount;
+            } else {
+                // Reset: show first 20
+                previousDisplayedCount = 0;
+                placesToDisplay = filteredPlaces.slice(0, 20);
+                displayedCount = placesToDisplay.length;
+            }
+        } else {
+            // Use dropdown limit
+            const limit = parseInt(displayLimitValue);
+            if (!isNaN(limit) && limit > 0) {
+                placesToDisplay = filteredPlaces.slice(0, limit);
+                displayedCount = placesToDisplay.length;
+            } else {
+                placesToDisplay = filteredPlaces;
+                displayedCount = placesToDisplay.length;
+            }
+        }
+    }
+    
+    // Show display info
+    const displayInfo = document.getElementById('displayInfo');
+    if (displayedCount < filteredCount) {
+        if (!displayInfo) {
+            const infoSpan = document.createElement('span');
+            infoSpan.id = 'displayInfo';
+            infoSpan.className = 'display-info';
+            infoSpan.style.marginLeft = '8px';
+            infoSpan.style.color = 'var(--text-secondary)';
+            infoSpan.style.fontSize = '0.9rem';
+            resultsCount.parentElement.appendChild(infoSpan);
+        }
+        if (displayInfo) {
+            displayInfo.textContent = `(Showing ${displayedCount} of ${filteredCount})`;
+        }
+    } else {
+        if (displayInfo) displayInfo.remove();
+    }
     
     const filteredCountEl = document.getElementById('filteredNumber');
     const filteredCountSpan = document.getElementById('filteredCount');
@@ -430,63 +656,85 @@ async function filterAndDisplayResults() {
         }
     }
     
-    // Show/hide download button
-    const downloadBtn = document.getElementById('downloadBtn');
-    if (downloadBtn) {
-        downloadBtn.style.display = filteredPlaces.length > 0 ? 'inline-block' : 'none';
+    // Show/hide download controls
+    const downloadControls = document.querySelector('.download-controls');
+    if (downloadControls) {
+        downloadControls.style.display = filteredPlaces.length > 0 ? 'flex' : 'none';
+        updateDownloadOptions(filteredPlaces.length);
     }
     
+    // Show/hide display filter
+    const displayFilter = document.querySelector('.display-filter');
+    if (displayFilter) {
+        displayFilter.style.display = filteredPlaces.length > 0 ? 'flex' : 'none';
+        updateDisplayOptions(filteredPlaces.length);
+    }
+    
+    console.log('Filter and Display - Places to display:', placesToDisplay.length);
+    console.log('Filter and Display - Filtered places:', filteredPlaces.length);
+    
     if (filteredPlaces.length === 0) {
-        resultsContainer.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 40px;">No places found matching the filter criteria.</p>';
+        resultsContainer.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 40px;">No places found matching the filter criteria. Try unchecking "Show only places without website" filter.</p>';
+        hideResultsLoading();
         return;
     }
     
-    // Display filtered places
-    filteredPlaces.forEach(place => {
-        resultsContainer.appendChild(createPlaceCard(place));
-    });
+    if (placesToDisplay.length === 0) {
+        resultsContainer.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 40px;">No places to display with current filter settings. Try adjusting the display limit.</p>';
+        hideResultsLoading();
+        return;
+    }
+    
+    // Display filtered and limited places (append if loading more)
+    try {
+        if (isLoadingMore) {
+            // Append only the new cards (skip already displayed ones)
+            placesToDisplay.slice(previousDisplayedCount).forEach(place => {
+                const card = createPlaceCard(place);
+                if (card) {
+                    resultsContainer.appendChild(card);
+                }
+            });
+        } else {
+            // Display all cards
+            placesToDisplay.forEach(place => {
+                const card = createPlaceCard(place);
+                if (card) {
+                    resultsContainer.appendChild(card);
+                }
+            });
+        }
+        console.log('Filter and Display - Cards created successfully');
+    } catch (error) {
+        console.error('Error creating place cards:', error);
+        resultsContainer.innerHTML = `<p style="text-align: center; color: var(--danger-color); padding: 40px;">Error displaying results: ${error.message}</p>`;
+        hideResultsLoading();
+        return;
+    }
+    
+    // Show "Load More" button if there are more results
+    showLoadMoreButton(filteredPlaces.length, displayedCount);
+    
+    // Hide loading indicator
+    hideResultsLoading();
+    isLoadingMore = false;
 }
 
 // Append Results
 async function appendResults(places) {
-    // Fetch enriched data for new places
-    setLoading(true);
-    try {
-        const placeIds = places.map(p => p.place_id).filter(id => id);
-        if (placeIds.length > 0) {
-            const enrichedResponse = await fetch(`${API_BASE_URL}/places/enrich`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ place_ids: placeIds })
-            });
-            
-            const enrichedData = await enrichedResponse.json();
-            if (enrichedData.places && enrichedData.places.length > 0) {
-                const enrichedMap = new Map(enrichedData.places.map(p => [p.place_id, p]));
-                places = places.map(place => {
-                    const enriched = enrichedMap.get(place.place_id);
-                    return enriched ? { ...place, ...enriched } : place;
-                });
-            }
-        }
-    } catch (error) {
-        console.error('Error fetching enriched data:', error);
-    } finally {
-        setLoading(false);
-    }
-    
-    // Add to all places data
+    // Add to all places data immediately (without enriched data)
     allPlacesData = [...allPlacesData, ...places];
     
-    // Filter and display
+    // Display immediately
+    setLoading(false);
     filterAndDisplayResults();
     
-    const currentCount = parseInt(resultsCount.textContent);
     resultsCount.textContent = allPlacesData.length;
     currentPage++;
     updatePageInfo();
+    
+    // Fetch enriched data in background for new places
+    fetchEnrichedDataInBackground(places);
 }
 
 // Create Place Card
@@ -606,6 +854,64 @@ function updatePageInfo() {
     }
 }
 
+// Update Display Options
+function updateDisplayOptions(totalCount) {
+    const displayLimit = document.getElementById('displayLimit');
+    if (!displayLimit) return;
+    
+    // Clear existing options except "All Results"
+    displayLimit.innerHTML = '<option value="all">All Results</option>';
+    
+    // Add options: 10, 20, 30, 40, 50, 100, 200, 500, 1000, etc.
+    const options = [10, 20, 30, 40, 50, 100, 200, 500, 1000];
+    
+    options.forEach(option => {
+        if (option <= totalCount) {
+            const optionElement = document.createElement('option');
+            optionElement.value = option;
+            optionElement.textContent = `Show ${option}`;
+            displayLimit.appendChild(optionElement);
+        }
+    });
+    
+    // If total is not in standard options and less than 1000, add it
+    if (totalCount > 0 && !options.includes(totalCount) && totalCount < 1000) {
+        const optionElement = document.createElement('option');
+        optionElement.value = totalCount;
+        optionElement.textContent = `Show All ${totalCount}`;
+        displayLimit.appendChild(optionElement);
+    }
+}
+
+// Update Download Options
+function updateDownloadOptions(totalCount) {
+    const downloadLimit = document.getElementById('downloadLimit');
+    if (!downloadLimit) return;
+    
+    // Clear existing options except "All Results"
+    downloadLimit.innerHTML = '<option value="all">All Results</option>';
+    
+    // Add options: 10, 20, 30, 40, 50, etc. up to total count
+    const options = [10, 20, 30, 40, 50, 100, 200, 500];
+    
+    options.forEach(option => {
+        if (option <= totalCount) {
+            const optionElement = document.createElement('option');
+            optionElement.value = option;
+            optionElement.textContent = `First ${option} Results`;
+            downloadLimit.appendChild(optionElement);
+        }
+    });
+    
+    // If total is not in standard options, add it
+    if (totalCount > 0 && !options.includes(totalCount) && totalCount < 500) {
+        const optionElement = document.createElement('option');
+        optionElement.value = totalCount;
+        optionElement.textContent = `All ${totalCount} Results`;
+        downloadLimit.appendChild(optionElement);
+    }
+}
+
 // Download Excel
 async function downloadExcel() {
     const downloadBtn = document.getElementById('downloadBtn');
@@ -620,6 +926,18 @@ async function downloadExcel() {
     if (placesToExport.length === 0) {
         alert('No places to export');
         return;
+    }
+    
+    // Get download limit from dropdown
+    const downloadLimit = document.getElementById('downloadLimit');
+    const limitValue = downloadLimit ? downloadLimit.value : 'all';
+    
+    // Apply limit if not "all"
+    if (limitValue !== 'all') {
+        const limit = parseInt(limitValue);
+        if (!isNaN(limit) && limit > 0) {
+            placesToExport = placesToExport.slice(0, limit);
+        }
     }
     
     setLoading(true);
@@ -687,7 +1005,8 @@ async function downloadExcel() {
             window.URL.revokeObjectURL(openUrl);
         }, 2000);
         
-        alert(`Successfully exported ${placesToExport.length} places to Excel!\n\nThe file has been downloaded and should open automatically in your spreadsheet application.`);
+        const limitText = limitValue === 'all' ? 'all' : `first ${placesToExport.length}`;
+        alert(`Successfully exported ${limitText} places to Excel!\n\nThe file has been downloaded and should open automatically in your spreadsheet application.`);
     } catch (error) {
         console.error('Export error:', error);
         alert(`Export failed: ${error.message}`);
@@ -696,6 +1015,83 @@ async function downloadExcel() {
         downloadBtn.disabled = false;
         downloadBtn.textContent = '📥 Download Excel';
     }
+}
+
+// Show Results Loading Indicator
+function showResultsLoading() {
+    const loadingDiv = document.createElement('div');
+    loadingDiv.id = 'resultsLoading';
+    loadingDiv.className = 'results-loading';
+    loadingDiv.innerHTML = `
+        <div class="loading-spinner"></div>
+        <p>Loading results...</p>
+    `;
+    resultsContainer.appendChild(loadingDiv);
+}
+
+// Hide Results Loading Indicator
+function hideResultsLoading() {
+    const loadingDiv = document.getElementById('resultsLoading');
+    if (loadingDiv) {
+        loadingDiv.remove();
+    }
+}
+
+// Show Load More Button
+function showLoadMoreButton(totalCount, displayedCount) {
+    // Remove existing button
+    const existingBtn = document.getElementById('loadMoreBtn');
+    if (existingBtn) {
+        existingBtn.remove();
+    }
+    
+    // Show button if there are more results to display
+    if (displayedCount < totalCount) {
+        const loadMoreBtn = document.createElement('button');
+        loadMoreBtn.id = 'loadMoreBtn';
+        loadMoreBtn.className = 'btn btn-secondary load-more-btn';
+        loadMoreBtn.textContent = `Load More (${totalCount - displayedCount} remaining)`;
+        loadMoreBtn.addEventListener('click', loadMoreResults);
+        resultsContainer.appendChild(loadMoreBtn);
+    }
+}
+
+// Load More Results
+async function loadMoreResults() {
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    if (loadMoreBtn) {
+        loadMoreBtn.disabled = true;
+        loadMoreBtn.textContent = 'Loading...';
+    }
+    
+    isLoadingMore = true;
+    
+    // Filter places
+    let filteredPlaces = allPlacesData;
+    if (filterNoWebsite) {
+        filteredPlaces = allPlacesData.filter(place => !place.website || place.website === '');
+    }
+    
+    // Check if we need to fetch more data from API
+    if (displayedCount >= filteredPlaces.length && currentNextPageToken) {
+        // Need to fetch next page from API
+        try {
+            await loadNextPage();
+        } catch (error) {
+            console.error('Error loading next page:', error);
+            isLoadingMore = false;
+            if (loadMoreBtn) {
+                loadMoreBtn.disabled = false;
+                loadMoreBtn.textContent = `Load More (${filteredPlaces.length - displayedCount} remaining)`;
+            }
+            return;
+        }
+    }
+    
+    // Display 20 more results
+    setTimeout(() => {
+        filterAndDisplayResults();
+    }, 100);
 }
 
 // Set Loading State
@@ -735,8 +1131,8 @@ function clearResults() {
     allPlacesData = [];
     currentPage = 1;
     paginationContainer.style.display = 'none';
-    const downloadBtn = document.getElementById('downloadBtn');
-    if (downloadBtn) downloadBtn.style.display = 'none';
+    const downloadControls = document.querySelector('.download-controls');
+    if (downloadControls) downloadControls.style.display = 'none';
     const filteredCountSpan = document.getElementById('filteredCount');
     if (filteredCountSpan) filteredCountSpan.style.display = 'none';
 }

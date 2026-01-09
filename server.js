@@ -345,48 +345,62 @@ app.post("/places/enrich", async (req, res) => {
   }
 
   try {
+    // Fetch details in parallel batches (5 at a time to respect rate limits)
+    const batchSize = 5;
     const enrichedPlaces = [];
     
-    // Fetch details for each place (with delay to respect rate limits)
-    for (const placeId of place_ids) {
-      try {
-        const params = {
-          place_id: placeId,
-          key: process.env.GOOGLE_MAPS_API_KEY,
-          fields: "name,formatted_address,formatted_phone_number,website,opening_hours,rating,user_ratings_total,geometry,place_id,types,business_status,reviews"
-        };
+    for (let i = 0; i < place_ids.length; i += batchSize) {
+      const batch = place_ids.slice(i, i + batchSize);
+      
+      // Fetch batch in parallel
+      const batchPromises = batch.map(async (placeId) => {
+        try {
+          const params = {
+            place_id: placeId,
+            key: process.env.GOOGLE_MAPS_API_KEY,
+            fields: "name,formatted_address,formatted_phone_number,website,opening_hours,rating,user_ratings_total,geometry,place_id,types,business_status,reviews"
+          };
 
-        const response = await axios.get(
-          "https://maps.googleapis.com/maps/api/place/details/json",
-          { params }
-        );
+          const response = await axios.get(
+            "https://maps.googleapis.com/maps/api/place/details/json",
+            { params }
+          );
 
-        if (response.data.status === "OK") {
-          const place = response.data.result;
-          enrichedPlaces.push({
-            name: place.name,
-            address: place.formatted_address,
-            phone: place.formatted_phone_number || "",
-            website: place.website || "",
-            rating: place.rating,
-            total_reviews: place.user_ratings_total,
-            location: place.geometry?.location,
-            place_id: place.place_id,
-            types: place.types,
-            reviews: place.reviews ? place.reviews.slice(0, 5).map(review => ({
-              author_name: review.author_name,
-              rating: review.rating,
-              text: review.text,
-              time: review.time,
-              relative_time_description: review.relative_time_description
-            })) : []
-          });
+          if (response.data.status === "OK") {
+            const place = response.data.result;
+            return {
+              name: place.name,
+              address: place.formatted_address,
+              phone: place.formatted_phone_number || "",
+              website: place.website || "",
+              rating: place.rating,
+              total_reviews: place.user_ratings_total,
+              location: place.geometry?.location,
+              place_id: place.place_id,
+              types: place.types,
+              reviews: place.reviews ? place.reviews.slice(0, 5).map(review => ({
+                author_name: review.author_name,
+                rating: review.rating,
+                text: review.text,
+                time: review.time,
+                relative_time_description: review.relative_time_description
+              })) : []
+            };
+          }
+          return null;
+        } catch (error) {
+          console.error(`Error fetching details for ${placeId}:`, error.message);
+          return null;
         }
-        
-        // Small delay to respect rate limits
-        await delay(100);
-      } catch (error) {
-        console.error(`Error fetching details for ${placeId}:`, error.message);
+      });
+      
+      // Wait for batch to complete
+      const batchResults = await Promise.all(batchPromises);
+      enrichedPlaces.push(...batchResults.filter(p => p !== null));
+      
+      // Small delay between batches to respect rate limits
+      if (i + batchSize < place_ids.length) {
+        await delay(200);
       }
     }
 
@@ -467,6 +481,20 @@ app.post("/places/export-excel", async (req, res) => {
           row[header] = place.location?.lng || "";
         } else if (headerLower.includes("place id") || headerLower.includes("place_id")) {
           row[header] = place.place_id || "";
+        } else if (headerLower.includes("google maps") || headerLower.includes("maps link") || headerLower.includes("location link") || headerLower.includes("map link")) {
+          // Generate Google Maps link
+          let mapsLink = "";
+          if (place.place_id) {
+            // Use place_id for more accurate location
+            mapsLink = `https://www.google.com/maps/place/?q=place_id:${place.place_id}`;
+          } else if (place.location?.lat && place.location?.lng) {
+            // Fallback to coordinates
+            mapsLink = `https://www.google.com/maps?q=${place.location.lat},${place.location.lng}`;
+          } else if (place.address) {
+            // Fallback to address search
+            mapsLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.address)}`;
+          }
+          row[header] = mapsLink;
         } else if (headerLower.includes("type") || headerLower.includes("category")) {
           row[header] = place.types ? place.types.join(", ") : "";
         } else if (headerLower.includes("review") && !headerLower.includes("count")) {

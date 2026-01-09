@@ -120,10 +120,25 @@
                                 <input type="checkbox" id="filterNoWebsite" checked>
                                 Show only places without website
                             </label>
+                            <div class="display-filter" style="display: none;">
+                                <label for="displayLimit" class="display-label">Display:</label>
+                                <select id="displayLimit" class="display-select">
+                                    <option value="all">All Results</option>
+                                </select>
+                            </div>
                         </div>
-                        <button type="button" id="downloadBtn" class="btn btn-primary" style="display: none;">
-                            📥 Download Excel
-                        </button>
+                        <div class="auto-fetch-info" style="display: none;">
+                            <span id="fetchingStatus" class="fetching-status">⏳ Fetching all results...</span>
+                        </div>
+                        <div class="download-controls" style="display: none;">
+                            <label for="downloadLimit" class="download-label">Download:</label>
+                            <select id="downloadLimit" class="download-select">
+                                <option value="all">All Results</option>
+                            </select>
+                            <button type="button" id="downloadBtn" class="btn btn-primary">
+                                📥 Download Excel
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div id="resultsContainer"></div>
